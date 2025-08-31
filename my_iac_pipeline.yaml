@@ -1,0 +1,61 @@
+trigger: none
+#   branches:
+#     include:
+#       - main
+#       - develop
+
+variables:
+  - name: TF_WORKING_DIR
+    value: "$(System.DefaultWorkingDirectory)/wiz_iac"
+  - name: ARM_SERVICE_CONNECTION
+    value: "ado_wiz_iac_svc"
+
+stages:
+  - stage: Terraform
+    displayName: "Terraform Plan & Apply"
+    variable:
+      - group: "wiz_ado_group"
+    jobs:
+      - job: Terraform_Apply
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+          - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+            inputs:
+              terraformVersion: 1.1.4
+              # terraformVersion: 1.2.9
+
+          - task: TerraformCLI@0
+            displayName: "Terraform Init"
+            inputs:
+              command: 'init'
+              workingDirectory: '$(TF_WORKING_DIR)'
+              allowTelemetryCollection: false
+              # backendType: 'azurerm'
+              # backendServiceArm: '$(ARM_SERVICE_CONNECTION)'
+
+          - task: TerraformCLI@0
+            displayName: "Terraform Validate"
+            inputs:
+              command: 'validate'
+              workingDirectory: '$(TF_WORKING_DIR)'
+
+          - task: TerraformCLI@0
+            displayName: "Terraform Plan"
+            inputs:
+              command: 'plan'
+              workingDirectory: '$(TF_WORKING_DIR)'
+              environmentServiceNameAzureRM: '$(ARM_SERVICE_CONNECTION)'
+              commandOptions: '-out=tfplan -var="ssh_public_key=$(sshPublicKey)"'
+            env:
+              sshPublicKey: $(SSH_PUBLIC_KEY)
+
+          - task: TerraformCLI@0
+            displayName: "Terraform Apply"
+            ## condition: succeeded()
+            inputs:
+              command: 'apply'
+              workingDirectory: '$(TF_WORKING_DIR)'
+              environmentServiceNameAzureRM: '$(ARM_SERVICE_CONNECTION)'
+              commandOptions: '-auto-approve tfplan'

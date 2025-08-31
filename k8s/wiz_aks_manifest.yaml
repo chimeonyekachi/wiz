@@ -1,0 +1,74 @@
+## kind deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tasky-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tasky
+  template:
+    metadata:
+      labels:
+        app: tasky
+    spec:
+      serviceAccountName: tasky-admin-sa
+      containers:
+        - name: tasky
+          image: <ACR_LOGIN_SERVER>/tasky:latest
+          imagePullPolicy: Always
+          env:
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-credentials
+                  key: MONGO_URI
+          ports:
+            - containerPort: 3000
+---
+## kind service
+apiVersion: v1
+kind: Service
+metadata:
+  name: tasky-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: tasky
+  ports:
+    - port: 80
+      targetPort: 3000
+
+---
+## kind secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongo-credentials
+  namespace: default
+type: Opaque
+stringData:
+  MONGO_URI: "mongodb://taskyuser:P@ssw0rd123!@<MONGO_VM_PRIVATE_IP>:27017/taskydb?authSource=admin"
+
+---
+## kind account binding
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tasky-admin-sa
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tasky-admin-sa-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: tasky-admin-sa
+    namespace: default
+

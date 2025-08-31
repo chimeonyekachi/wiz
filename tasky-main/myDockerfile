@@ -1,0 +1,17 @@
+FROM node:14-alpine
+
+WORKDIR /usr/src/app
+
+# Copy app files
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+# add the required wizexercise.txt with my name
+RUN echo "Onyekachi Chime - Wiz Exercise" > /wizexercise.txt
+
+# exposing container port as 3000
+EXPOSE 3000
+
+CMD ["node", "server.js"]
