@@ -43,6 +43,10 @@ variable "backup_container_name" {
   type = string
 }
 
+variable "backup_container_name_public" {
+  type = string
+}
+
 # AKS node count/size
 variable "aks_node_count" {
   type    = number

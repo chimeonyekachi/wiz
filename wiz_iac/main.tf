@@ -10,7 +10,7 @@ resource "azurerm_virtual_network" "vnet" {
   name                = "${var.prefix}-vnet"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
-  address_space       = ["10.0.0.0/16"]
+  address_space       = ["10.0.0.0/16"] #10.1.0.0/16
 }
 
 resource "azurerm_subnet" "aks_subnet" {
@@ -73,14 +73,14 @@ resource "azurerm_network_interface" "vm_nic" {
 
 # Storage Account (for mongo backups)
 resource "azurerm_storage_account" "storage" {
-  name                      = lower("${var.prefix}storage${random_integer.suffix.result}")
-  resource_group_name       = azurerm_resource_group.rg.name
-  location                  = azurerm_resource_group.rg.location
-  account_tier              = "Standard"
-  account_replication_type  = "LRS"
-  allow_nested_items        = true
-  min_tls_version           = "TLS1_2"
-  enable_https_traffic_only = false
+  name                     = lower("${var.prefix}storage${random_integer.suffix.result}")
+  resource_group_name      = azurerm_resource_group.rg.name
+  location                 = azurerm_resource_group.rg.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  # allow_nested_items        = true
+  min_tls_version = "TLS1_2"
+  #enable_https_traffic_only = false
 }
 
 resource "random_integer" "suffix" {
@@ -93,14 +93,21 @@ resource "azurerm_storage_container" "backup_container" {
   name                  = var.backup_container_name
   storage_account_name  = azurerm_storage_account.storage.name
   container_access_type = "blob"
+
+  depends_on = [
+    azurerm_storage_account.storage
+  ]
 }
 
 # Making the container publicly listable
 resource "azurerm_storage_container" "backup_container_public" {
-  name                  = var.backup_container_name
+  name                  = var.backup_container_name_public
   storage_account_name  = azurerm_storage_account.storage.name
   container_access_type = "container" # allows public list
-  depends_on            = [azurerm_storage_account.storage]
+
+  depends_on = [
+    azurerm_storage_account.storage
+  ]
 }
 
 # Managed Identity for VM via system_assigned
@@ -114,20 +121,37 @@ resource "azurerm_linux_virtual_machine" "mongo_vm" {
   disable_password_authentication = true
 
   admin_ssh_key {
-    username   = var.admin_username
+    username = var.admin_username
+    #public_key = file("file.pub")
     public_key = var.ssh_public_key
   }
+
+  # dynamic "admin_ssh_key" {
+  #     for_each = var.ssh_public_key != null ? ["fake"] : []
+  #     content {
+  #       public_key = file(var.ssh_public_key)
+  #       username   = var.admin_username
+  #     }
+  #   }
 
   os_disk {
     caching              = "ReadWrite"
     storage_account_type = "Standard_LRS"
   }
 
+  # tf apply error for old version
+  # source_image_reference {
+  #   publisher = "Canonical"
+  #   offer     = "UbuntuServer"
+  #   sku       = "18_04-lts" # SKU with outdated 1+ year
+  #   version   = "latest"    #"18.04.202407280" # Older image
+  # }
+
   source_image_reference {
     publisher = "Canonical"
-    offer     = "UbuntuServer"
-    sku       = "18_04-lts"    # SKU with outdated 1+ year
-    version   = "18.04.202104" # Older image
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
   }
 
   //   # calling cloud-init script to install old mongodb and schedule backups
@@ -141,11 +165,11 @@ resource "azurerm_linux_virtual_machine" "mongo_vm" {
 # VM's identity Contributor role at subscription = overly permissive
 data "azurerm_subscription" "current" {}
 
-resource "azurerm_role_assignment" "vm_identity_contributor" {
-  scope                = data.azurerm_subscription.current.id
-  role_definition_name = "Contributor"
-  principal_id         = azurerm_linux_virtual_machine.mongo_vm.identity[0].principal_id
-}
+# resource "azurerm_role_assignment" "vm_identity_contributor" {
+#   scope                = data.azurerm_subscription.current.id
+#   role_definition_name = "Contributor"
+#   principal_id         = azurerm_linux_virtual_machine.mongo_vm.identity[0].principal_id
+# }
 
 # AKS cluster with ACR integration
 resource "azurerm_kubernetes_cluster" "aks" {
@@ -164,23 +188,35 @@ resource "azurerm_kubernetes_cluster" "aks" {
   linux_profile {
     admin_username = var.admin_username
     ssh_key {
-      key_data = var.ssh_public_key
+      key_data = file("${path.module}/aks.pub")
+      #key_data = var.ssh_public_key_aks
     }
+  }
+
+  network_profile {
+    network_plugin = "kubenet"
+    service_cidr   = "10.1.0.0/16"
+    dns_service_ip = "10.1.0.10"
+    # docker_bridge_cidr = "172.17.0.1/16"
   }
 
   identity {
     type = "SystemAssigned"
   }
 
-  role_based_access_control {
-    enabled = true
-  }
+  # role_based_access_control {
+  #   enabled = true
+  # }
 
-  network_profile {
-    network_plugin = "azure"
-    network_policy = "azure"
-  }
+  # network_profile {
+  #   network_plugin = "azure"
+  #   network_policy = "azure"
+  # }
 
+  depends_on = [
+    azurerm_linux_virtual_machine.mongo_vm,
+    azurerm_storage_account.storage
+  ]
   # since enable HTTP application routing disabled by default; 
   # ingress will be user-managed
 }
@@ -195,9 +231,9 @@ resource "azurerm_container_registry" "acr" {
 }
 
 # AKS's identity pull on ACR - RBAC
-resource "azurerm_role_assignment" "aks_acr_pull" {
-  scope                = azurerm_container_registry.acr.id
-  role_definition_name = "AcrPull"
-  principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
-}
+# resource "azurerm_role_assignment" "aks_acr_pull" {
+#   scope                = azurerm_container_registry.acr.id
+#   role_definition_name = "AcrPull"
+#   principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
+# }
 
