@@ -1,0 +1,84 @@
+# add Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wiz-mongo-secret
+type: Opaque
+stringData:
+  mongo-uri: "mongodb://mongodb-0.mongodb:27017/taskydb"
+---
+# MongoDB StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+spec:
+  serviceName: "mongodb"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:6
+        ports:
+        - containerPort: 27017
+---
+# MongoDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+spec:
+  ports:
+  - port: 27017
+    targetPort: 27017
+  clusterIP: None
+  selector:
+    app: mongodb
+---
+# Deployment for Go app
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wiz-app-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wiz-app
+  template:
+    metadata:
+      labels:
+        app: wiz-app
+    spec:
+      containers:
+      - name: wiz-app-container
+        image: localhost:5000/wiz-app:1.0
+        ports:
+        - containerPort: 80
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: wiz-mongo-secret
+              key: mongo-uri
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wiz-app-service
+spec:
+  selector:
+    app: wiz-app
+  type: NodePort
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    nodePort: 30002

@@ -4,6 +4,12 @@ trigger: none
 #       - main
 #       - develop
 
+
+parameters:
+  - name: dockerfilePath
+    type: string
+    default: 'Dockerfile'
+
 variables:
   - group: "wiz_ado_group"
   - name: imageName
@@ -34,6 +40,7 @@ stages:
             inputs:
               command: build
               containerRegistry: $(ACR_RESOURCE)
+              dockerfile: '$(System.DefaultWorkingDirectory)/${{ parameters.dockerfilePath}}'
               repository: $(imageName)
               tags: |
                 $(tag)
